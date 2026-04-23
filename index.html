@@ -492,10 +492,12 @@ canvas.tc{width:100%!important;height:155px!important;}
     <div class="dhd">
       <div><h2>Dashboard de Avaliações</h2><p id="dashSub">Carregando...</p></div>
       <div class="dctrl">
-        <select id="fProg" onchange="renderDash()"><option value="">Todos os programas</option></select>
+        <select id="fProg" onchange="onFilterChange()"><option value="">Todos os programas</option></select>
+        <select id="fAtiv" onchange="renderDash()"><option value="">Todas as atividades</option></select>
         <select id="fPeriod" onchange="renderDash()"><option value="">Todo período</option><option value="7">Últimos 7 dias</option><option value="30">Últimos 30 dias</option><option value="90">Últimos 90 dias</option></select>
         <button class="dbtn pr" onclick="loadDash()"><span class="ms">refresh</span> Atualizar</button>
-        <button class="dbtn ex" onclick="exportCSV()"><span class="ms">download</span> Exportar</button>
+        <button class="dbtn ex" onclick="exportExcel()"><span class="ms">table_view</span> Excel</button>
+        <button class="dbtn ex" onclick="exportPDF()"><span class="ms">picture_as_pdf</span> PDF</button>
         <button class="dbtn lo" onclick="logout()">Sair</button>
       </div>
     </div>
@@ -856,9 +858,10 @@ async function loadDash() {
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
     allData = await res.json();
-    var progs = allData.map(function(r){ return r.programa_nome; }).filter(function(v,i,a){ return v && a.indexOf(v)===i; });
+    var progs = allData.map(function(r){ return r.programa_nome; }).filter(function(v,i,a){ return v && a.indexOf(v)===i; }).sort();
     var fp = document.getElementById('fProg');
     fp.innerHTML = '<option value="">Todos os programas</option>'+progs.map(function(p){ return '<option value="'+p+'">'+p+'</option>'; }).join('');
+    populateAtividades(allData);
     hideAlert('dAlert');
     renderDash();
   } catch(e) {
@@ -867,11 +870,27 @@ async function loadDash() {
   }
 }
 
+function populateAtividades(source) {
+  var prog = document.getElementById('fProg') ? document.getElementById('fProg').value : '';
+  var base = prog ? source.filter(function(r){ return r.programa_nome===prog; }) : source;
+  var ativs = base.map(function(r){ return r.atividade; }).filter(function(v,i,a){ return v && a.indexOf(v)===i; }).sort();
+  var fa = document.getElementById('fAtiv');
+  var cur = fa ? fa.value : '';
+  if(fa) fa.innerHTML = '<option value="">Todas as atividades</option>'+ativs.map(function(a){ return '<option value="'+a+'"'+(a===cur?' selected':'')+'>'+a+'</option>'; }).join('');
+}
+
+function onFilterChange() {
+  populateAtividades(allData);
+  renderDash();
+}
+
 function getFiltered() {
   var prog = document.getElementById('fProg') ? document.getElementById('fProg').value : '';
+  var ativ = document.getElementById('fAtiv') ? document.getElementById('fAtiv').value : '';
   var dias = document.getElementById('fPeriod') ? document.getElementById('fPeriod').value : '';
   var data = allData.slice();
   if(prog) data = data.filter(function(r){ return r.programa_nome===prog; });
+  if(ativ) data = data.filter(function(r){ return r.atividade===ativ; });
   if(dias){ var cut = new Date(Date.now()-dias*86400000); data=data.filter(function(r){ return new Date(r.created_at)>=cut; }); }
   return data;
 }
@@ -1039,9 +1058,8 @@ function renderWordCloud(d) {
   }).join('');
 }
 
-function exportCSV() {
+function getExportRows() {
   var d = getFiltered();
-  if(!d.length){ alert('Nenhum dado para exportar.'); return; }
   var headers = ['Data Envio','Data Atividade','Programa','Atividade','Genero','Faixa Etaria','Escolaridade','Renda','Regiao','Situacao Negocio','Primeira Vez','NPS','Melhoria Percebida','Areas Melhoria','Aplicou Aprendizado','Continuar','Ponto Positivo','Ponto Melhoria'];
   LIKERT_BLOCOS.forEach(function(b){ b.itens.forEach(function(q){ headers.push(q.id); }); });
   var keys = ['created_at','data_atividade','programa_nome','atividade','genero','faixa_etaria','escolaridade','renda','regiao','situacao_negocio','primeira_vez','nps','melhoria_percebida','areas_melhoria','aplicou_aprendizado','continuar_programas','ponto_positivo','ponto_melhoria'];
@@ -1051,10 +1069,126 @@ function exportCSV() {
     if((k==='created_at'||k==='data_atividade') && v) return new Date(v).toLocaleDateString('pt-BR');
     return v!=null?v:'';
   }); });
-  var csv = [headers].concat(rows).map(function(row){ return row.map(function(v){ return '"'+String(v).replace(/"/g,'""')+'"'; }).join(','); }).join('\n');
-  var blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
-  var a = document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='ENEDES_AVALIA_'+new Date().toISOString().split('T')[0]+'.csv'; a.click();
+  return { headers: headers, rows: rows, data: d };
+}
+
+function exportExcel() {
+  var er = getExportRows();
+  if(!er.rows.length){ alert('Nenhum dado para exportar.'); return; }
+  var wsData = [er.headers].concat(er.rows);
+  var wb = XLSX.utils.book_new();
+  var ws = XLSX.utils.aoa_to_sheet(wsData);
+  // Column widths
+  ws['!cols'] = er.headers.map(function(h,i){ return {wch: i<4?32:i>=16?48:18}; });
+  XLSX.utils.book_append_sheet(wb, ws, 'Avaliações');
+  // Summary sheet
+  var d = er.data;
+  var npsAll = d.filter(function(r){ return r.nps!==null; }).map(function(r){ return r.nps; });
+  var prom = npsAll.filter(function(v){ return v>=9; }).length;
+  var det = npsAll.filter(function(v){ return v<=6; }).length;
+  var nScore = npsAll.length ? Math.round(((prom-det)/npsAll.length)*100) : '—';
+  var allItens = LIKERT_BLOCOS.reduce(function(acc,b){ return acc.concat(b.itens); },[]);
+  var allLV = allItens.reduce(function(acc,q){ return acc.concat(d.map(function(r){ return r[q.id]; }).filter(function(v){ return v; })); },[]);
+  var avgL = allLV.length ? (allLV.reduce(function(a,b){ return a+b; },0)/allLV.length).toFixed(1) : '—';
+  var prog = document.getElementById('fProg').value || 'Todos';
+  var ativ = document.getElementById('fAtiv').value || 'Todas';
+  var sumData = [
+    ['RELATÓRIO ENEDES AVALIA'],
+    ['Gerado em', new Date().toLocaleDateString('pt-BR')],
+    ['Programa', prog], ['Atividade', ativ],
+    [],
+    ['RESUMO EXECUTIVO'],
+    ['Total de avaliações', d.length],
+    ['Score NPS', nScore],
+    ['Média Likert geral', avgL],
+    ['Promotores', prom], ['Neutros', npsAll.filter(function(v){ return v>=7&&v<=8;}).length], ['Detratores', det],
+    [],
+    ['MÉDIAS POR DIMENSÃO'],
+    ['Dimensão','Pergunta','Média'],
+  ];
+  LIKERT_BLOCOS.forEach(function(b){
+    b.itens.forEach(function(q){
+      var vals = d.map(function(r){ return r[q.id]; }).filter(function(v){ return v; });
+      var avg = vals.length ? (vals.reduce(function(a,c){ return a+c; },0)/vals.length).toFixed(2) : '—';
+      sumData.push([b.label, q.q, avg]);
+    });
+  });
+  var ws2 = XLSX.utils.aoa_to_sheet(sumData);
+  ws2['!cols'] = [{wch:28},{wch:72},{wch:10}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Resumo');
+  XLSX.writeFile(wb, 'ENEDES_AVALIA_'+new Date().toISOString().split('T')[0]+'.xlsx');
+}
+
+function exportPDF() {
+  var d = getFiltered();
+  if(!d.length){ alert('Nenhum dado para exportar.'); return; }
+  var prog = document.getElementById('fProg').value || 'Todos os programas';
+  var ativ = document.getElementById('fAtiv').value || 'Todas as atividades';
+  var npsAll = d.filter(function(r){ return r.nps!==null; }).map(function(r){ return r.nps; });
+  var prom = npsAll.filter(function(v){ return v>=9; }).length;
+  var det  = npsAll.filter(function(v){ return v<=6; }).length;
+  var neu  = npsAll.filter(function(v){ return v>=7&&v<=8; }).length;
+  var nScore = npsAll.length ? Math.round(((prom-det)/npsAll.length)*100) : '—';
+  var allItens = LIKERT_BLOCOS.reduce(function(acc,b){ return acc.concat(b.itens); },[]);
+  var allLV = allItens.reduce(function(acc,q){ return acc.concat(d.map(function(r){ return r[q.id]; }).filter(function(v){ return v; })); },[]);
+  var avgL = allLV.length ? (allLV.reduce(function(a,b){ return a+b; },0)/allLV.length).toFixed(1) : '—';
+
+  var likertRows = '';
+  LIKERT_BLOCOS.forEach(function(b){
+    b.itens.forEach(function(q){
+      var vals = d.map(function(r){ return r[q.id]; }).filter(function(v){ return v; });
+      var avg = vals.length ? (vals.reduce(function(a,c){ return a+c; },0)/vals.length) : 0;
+      var pct = (avg/5)*100;
+      var cor = avg>=4.5?'#22913a':avg>=3.5?'#2563eb':avg>=2.5?'#d97706':'#dc2626';
+      likertRows += '<tr><td style="font-size:11px;color:#374151;padding:6px 8px;border-bottom:1px solid #f0f2f7;">'+q.q+'</td>'
+        +'<td style="padding:6px 8px;border-bottom:1px solid #f0f2f7;"><div style="background:#e8ecf3;border-radius:99px;height:8px;width:160px;overflow:hidden;"><div style="height:100%;width:'+pct.toFixed(0)+'%;background:'+cor+';border-radius:99px;"></div></div></td>'
+        +'<td style="font-weight:700;font-size:12px;color:'+cor+';padding:6px 8px;border-bottom:1px solid #f0f2f7;text-align:center;">'+(avg?avg.toFixed(1):'—')+'</td></tr>';
+    });
+  });
+
+  // NPS por atividade
+  var atMap = {};
+  d.forEach(function(r){ if(r.atividade){ if(!atMap[r.atividade]) atMap[r.atividade]={tot:0,p:0,d:0,nps:[]}; atMap[r.atividade].tot++; if(r.nps>=9) atMap[r.atividade].p++; if(r.nps<=6) atMap[r.atividade].d++; if(r.nps!==null) atMap[r.atividade].nps.push(r.nps); } });
+  var atRows = Object.entries(atMap).sort(function(a,b){ return b[1].tot-a[1].tot; }).map(function(e){
+    var sc = e[1].nps.length ? Math.round(((e[1].p-e[1].d)/e[1].nps.length)*100) : '—';
+    var cor = typeof sc==='number'&&sc>=50?'#22913a':typeof sc==='number'&&sc>=0?'#d97706':'#dc2626';
+    return '<tr><td style="font-size:11px;padding:6px 8px;border-bottom:1px solid #f0f2f7;">'+e[0]+'</td><td style="text-align:center;padding:6px 8px;border-bottom:1px solid #f0f2f7;">'+e[1].tot+'</td><td style="text-align:center;font-weight:700;color:'+cor+';padding:6px 8px;border-bottom:1px solid #f0f2f7;">'+sc+'</td></tr>';
+  }).join('');
+
+  var html = '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">'
+    +'<style>@import url(\'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap\');'
+    +'*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Inter,sans-serif;background:#fff;color:#0a1f44;padding:32px 40px;}'
+    +'@page{size:A4;margin:20mm 18mm;}@media print{body{padding:0;}}'
+    +'h1{font-family:Manrope,sans-serif;font-size:22px;font-weight:800;color:#00236f;margin-bottom:4px;}'
+    +'.sub{font-size:11px;color:#6b7280;margin-bottom:20px;}'
+    +'.krow{display:flex;gap:12px;margin-bottom:20px;}'
+    +'.kbox{flex:1;background:#f8f9ff;border-radius:10px;padding:14px 16px;border-top:3px solid #00236f;}'
+    +'.klbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;margin-bottom:6px;}'
+    +'.kval{font-family:Manrope,sans-serif;font-size:26px;font-weight:800;color:#00236f;line-height:1;}'
+    +'.sec{font-family:Manrope,sans-serif;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#00236f;margin:18px 0 10px;padding-bottom:5px;border-bottom:2px solid #e8ecf3;}'
+    +'table{width:100%;border-collapse:collapse;}th{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;padding:7px 8px;border-bottom:2px solid #e8ecf3;text-align:left;}'
+    +'.footer{margin-top:28px;font-size:9px;color:#9ca3af;text-align:center;border-top:1px solid #e8ecf3;padding-top:10px;}'
+    +'</style></head><body>'
+    +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">'
+    +'<div style="background:#00236f;color:white;font-family:Manrope,sans-serif;font-weight:800;font-size:13px;padding:7px 12px;border-radius:8px;">ENEDES AVALIA</div>'
+    +'<div><h1>Relatório de Avaliações</h1><div class="sub">Programa: <strong>'+prog+'</strong> · Atividade: <strong>'+ativ+'</strong> · Gerado em '+new Date().toLocaleDateString('pt-BR')+'</div></div></div>'
+    +'<div class="krow">'
+    +'<div class="kbox"><div class="klbl">Total avaliações</div><div class="kval">'+d.length+'</div></div>'
+    +'<div class="kbox" style="border-top-color:#2563eb"><div class="klbl">Score NPS</div><div class="kval" style="color:#2563eb">'+nScore+'</div></div>'
+    +'<div class="kbox" style="border-top-color:#22913a"><div class="klbl">Média Likert</div><div class="kval" style="color:#22913a">'+avgL+'</div></div>'
+    +'<div class="kbox" style="border-top-color:#22913a"><div class="klbl">Promotores</div><div class="kval" style="color:#22913a">'+prom+'</div></div>'
+    +'<div class="kbox" style="border-top-color:#d97706"><div class="klbl">Neutros</div><div class="kval" style="color:#d97706">'+neu+'</div></div>'
+    +'<div class="kbox" style="border-top-color:#dc2626"><div class="klbl">Detratores</div><div class="kval" style="color:#dc2626">'+det+'</div></div>'
+    +'</div>'
+    +'<div class="sec">📊 Médias Likert por Dimensão</div>'
+    +'<table><thead><tr><th style="width:60%">Critério</th><th style="width:25%">Barra</th><th>Média</th></tr></thead><tbody>'+likertRows+'</tbody></table>'
+    +(atRows?'<div class="sec">📅 NPS por Atividade</div><table><thead><tr><th>Atividade</th><th style="text-align:center">Respostas</th><th style="text-align:center">NPS</th></tr></thead><tbody>'+atRows+'</tbody></table>':'')
+    +'<div class="footer">ENEDES — Instituto Federal de Brasília · enedes.ifb.edu.br · Relatório gerado automaticamente pelo sistema ENEDES AVALIA</div>'
+    +'</body></html>';
+
+  var w = window.open('','_blank','width=900,height=700');
+  w.document.open(); w.document.write(html); w.document.close();
+  w.onload = function(){ w.focus(); w.print(); };
 }
 
 function showAl(id,msg,type){ var el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className='alert '+(type||'err')+' show'; setTimeout(function(){ el.classList.remove('show'); },5000); }
