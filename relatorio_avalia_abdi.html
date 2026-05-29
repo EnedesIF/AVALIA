@@ -173,7 +173,8 @@ body{font-family:'Sora',sans-serif;background:#f0f4f8;color:var(--cinza-escuro);
     <button class="nav-tab" onclick="irPara('respostas',this)">📋 Respostas</button>
   </div>
   <div class="nav-right">
-    <select id="filtro-prog" onchange="aplicarFiltro()"><option value="">Todos os programas</option></select>
+    <select id="filtro-prog" onchange="atualizaAtividades();aplicarFiltro();"><option value="">Todos os programas</option></select>
+    <select id="filtro-atividade" onchange="aplicarFiltro()" style="max-width:200px"><option value="">Todas as atividades</option></select>
     <select id="filtro-periodo" onchange="aplicarFiltro()">
       <option value="">Todo período</option>
       <option value="7">Últimos 7 dias</option>
@@ -299,6 +300,8 @@ async function carregar(){
     const s=document.getElementById(id);
     progs.forEach(p=>{ const o=document.createElement('option'); o.value=o.textContent=p; s.appendChild(o); });
   });
+  // Popula todas as atividades inicialmente
+  atualizaAtividades();
 
   document.getElementById('loading').style.display='none';
   document.getElementById('app').style.display='block';
@@ -306,12 +309,25 @@ async function carregar(){
 }
 
 function filtrar(){
-  const prog = document.getElementById('filtro-prog').value;
-  const dias = parseInt(document.getElementById('filtro-periodo').value)||0;
+  const prog  = document.getElementById('filtro-prog').value;
+  const ativ  = document.getElementById('filtro-atividade').value;
+  const dias  = parseInt(document.getElementById('filtro-periodo').value)||0;
   let d = TODOS;
-  if(prog) d=d.filter(r=>r.programa_nome===prog);
+  if(prog)  d=d.filter(r=>r.programa_nome===prog);
+  if(ativ)  d=d.filter(r=>r.atividade===ativ);
   if(dias){ const lim=new Date(Date.now()-dias*86400000); d=d.filter(r=>new Date(r.created_at)>=lim); }
   return d;
+}
+
+function atualizaAtividades(){
+  const prog = document.getElementById('filtro-prog').value;
+  const sel  = document.getElementById('filtro-atividade');
+  const atual = sel.value;
+  // Filtra atividades do programa selecionado
+  let fonte = prog ? TODOS.filter(r=>r.programa_nome===prog) : TODOS;
+  const ativs = [...new Set(fonte.map(r=>r.atividade).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">Todas as atividades</option>';
+  ativs.forEach(a=>{ const o=document.createElement('option'); o.value=o.textContent=a; if(a===atual)o.selected=true; sel.appendChild(o); });
 }
 
 function aplicarFiltro(){
