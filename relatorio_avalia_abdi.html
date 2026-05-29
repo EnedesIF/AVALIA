@@ -476,9 +476,47 @@ function renderLikert(){
   },100);
 }
 
+
+// Normaliza valores do banco para os do formulário atual
+function normalizaSituacao(v){
+  if(!v) return 'Não informado';
+  const vl = v.toLowerCase().trim();
+  if(vl.includes('ideia')) return 'Ideia não implementada';
+  if(vl.includes('informal')) return 'Negócio informal';
+  if(vl.includes('mei formalizado')||vl==='mei') return 'MEI formalizado';
+  if(vl.includes('me / epp')||vl==='me'||vl==='epp'||vl.includes('me/epp')||vl.includes('eppe')) return 'ME / EPP';
+  if(vl.includes('sem neg')||vl.includes('ainda não')||vl.includes('ainda nao')||vl.includes('nao tenho')) return 'Sem negócio';
+  return v;
+}
+function normalizaGenero(v){
+  if(!v) return 'Não informado';
+  const vl = v.toLowerCase().trim();
+  if(vl.includes('feminin')) return 'Feminino';
+  if(vl.includes('masculin')) return 'Masculino';
+  if(vl.includes('binari')||vl.includes('bináro')) return 'Não binário';
+  if(vl.includes('prefer')||vl.includes('informar')) return 'Prefiro não informar';
+  return v;
+}
+function normalizaFaixa(v){
+  if(!v) return 'Não informado';
+  const vl = v.toLowerCase().trim();
+  if(vl.includes('24')||vl.includes('18-24')) return 'Até 24 anos';
+  if(vl.includes('25')&&vl.includes('34')||vl==='25-34') return '25 – 34 anos';
+  if(vl.includes('35')&&vl.includes('44')||vl==='35-44') return '35 – 44 anos';
+  if(vl.includes('45')&&vl.includes('54')||vl==='45-54') return '45 – 54 anos';
+  if(vl.includes('55')||vl.includes('55+')) return '55 anos ou mais';
+  return v;
+}
 function renderPerfil(){
   const d=filtrar();
-  function countBy(key){ const m={}; d.forEach(r=>{ if(r[key])m[r[key]]=(m[r[key]]||0)+1; }); return m; }
+  function countBy(key,normFn){ 
+    const m={}; 
+    d.forEach(r=>{ 
+      const v = normFn ? normFn(r[key]) : (r[key]||'Não informado');
+      m[v]=(m[v]||0)+1; 
+    }); 
+    return m; 
+  }
 
   destroyCharts(['chartGenero','chartFaixa','chartNegocio','chartEscol','chartRegiao']);
   setTimeout(()=>{
@@ -492,9 +530,9 @@ function renderPerfil(){
       const entries=Object.entries(data).sort((a,b)=>b[1]-a[1]).slice(0,8);
       charts[id]=new Chart(el,{type:'bar',data:{labels:entries.map(e=>e[0].substring(0,20)),datasets:[{data:entries.map(e=>e[1]),backgroundColor:'rgba(5,150,105,.7)',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true},y:{ticks:{font:{size:9}}}}}});
     }
-    pie('chartGenero',countBy('genero'));
-    pie('chartFaixa',countBy('faixa_etaria'));
-    pie('chartNegocio',countBy('situacao_negocio'));
+    pie('chartGenero',countBy('genero',normalizaGenero));
+    pie('chartFaixa',countBy('faixa_etaria',normalizaFaixa));
+    pie('chartNegocio',countBy('situacao_negocio',normalizaSituacao));
     bar('chartEscol',countBy('escolaridade'));
     bar('chartRegiao',countBy('regiao'));
   },100);
@@ -548,6 +586,12 @@ function irPara(pagina,btn){
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('ativo'));
   document.getElementById('page-'+pagina).classList.add('ativo');
   if(btn) btn.classList.add('ativo');
+  // Re-renderiza a aba ao entrar nela
+  if(pagina==='dash') renderDash();
+  else if(pagina==='programas') renderProgramas();
+  else if(pagina==='likert') renderLikert();
+  else if(pagina==='perfil') renderPerfil();
+  else if(pagina==='respostas') renderRespostas();
 }
 
 function destroyCharts(ids){ ids.forEach(id=>{ if(charts[id]){ charts[id].destroy(); delete charts[id]; } }); }
